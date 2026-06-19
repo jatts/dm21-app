@@ -36,7 +36,37 @@ jobs:
     - name: Sync Capacitor
       run: npx @capacitor/cli sync android
 
-    - name: Add AdMob to AndroidManifest
+    - name: Add Permissions to AndroidManifest
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+
+        # Camera (barcode scanner + torch)
+        sed -i '/<manifest/a\
+        <uses-permission android:name="android.permission.CAMERA" />\
+        <uses-feature android:name="android.hardware.camera" android:required="false" />\
+        <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />\
+        <uses-feature android:name="android.hardware.camera.flash" android:required="false" />' "$MANIFEST"
+
+        # Internet + Network state (DB sync, ads, GitHub Pages load)
+        sed -i '/<manifest/a\
+        <uses-permission android:name="android.permission.INTERNET" />\
+        <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+
+        # Vibration (scan feedback)
+        sed -i '/<manifest/a\
+        <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
+
+        # Notifications (Android 13+ requires runtime permission too)
+        sed -i '/<manifest/a\
+        <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
+
+        # Wake lock (scanner camera ke time screen on rakhne ke liye)
+        sed -i '/<manifest/a\
+        <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
+
+        cat "$MANIFEST"
+
+    - name: Add AdMob App ID to AndroidManifest
       run: |
         sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' android/app/src/main/AndroidManifest.xml
 
