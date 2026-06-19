@@ -1,0 +1,9 @@
+{
+  "appId": "com.jatts.dm21",
+  "appName": "Discount Manager",
+  "webDir": "www",
+  "server": {
+    "url": "https://jatts.github.io/dm21/",
+    "cleartext": false
+  }
+}
