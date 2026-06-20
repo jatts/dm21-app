@@ -24,17 +24,37 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
 
-    - name: Install dependencies
-      run: npm install
+    - name: Clean install dependencies (no cache, fresh resolve)
+      run: |
+        rm -rf node_modules package-lock.json
+        npm install
+
+    - name: Verify Capacitor plugins installed
+      run: |
+        echo "=== Checking node_modules for plugins ==="
+        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob plugin native code present" || echo "❌ AdMob plugin native code MISSING"
+        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS plugin native code present" || echo "❌ TTS plugin native code MISSING"
+        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar plugin native code present" || echo "❌ StatusBar plugin native code MISSING"
 
     - name: Install Capacitor CLI globally
       run: npm install -g @capacitor/cli
 
+    - name: Remove old android folder (force fresh generation)
+      run: rm -rf android
+
     - name: Add Android platform
       run: npx @capacitor/cli add android
 
-    - name: Sync Capacitor
+    - name: Sync Capacitor (registers native plugins)
       run: npx @capacitor/cli sync android
+
+    - name: Verify plugins registered in MainActivity / capacitor.config
+      run: |
+        echo "=== capacitor.config.json (runtime) ==="
+        cat android/app/src/main/assets/capacitor.config.json 2>/dev/null || echo "Not found"
+        echo ""
+        echo "=== Checking generated plugin list ==="
+        find android -name "*.java" -path "*capacitor*" | grep -i "admob\|texttospeech\|statusbar" || echo "No plugin Java files found — check above"
 
     - name: Add Permissions to AndroidManifest
       run: |
