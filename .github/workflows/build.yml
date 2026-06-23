@@ -51,7 +51,7 @@ jobs:
     - name: Set Version Code and Version Name
       run: |
         sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
-        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
+        sed -i 's/versionName "[^"]*"/versionName "2.0"/' android/app/build.gradle
         echo "=== Version check ==="
         grep -E "versionCode|versionName" android/app/build.gradle
 
