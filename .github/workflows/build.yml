@@ -132,4 +132,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: dm21-v2.1.apk
-        path: android/app/build/outputs/apk/debug/Discount Manager.apk
+        path: android/app/build/outputs/apk/debug/Discount-Manager.apk
