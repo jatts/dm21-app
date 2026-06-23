@@ -51,14 +51,49 @@ jobs:
     - name: Set Version Code and Version Name
       run: |
         sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
-        sed -i 's/versionName "[^"]*"/versionName "2.0"/' android/app/build.gradle
+        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
         echo "=== Version check ==="
         grep -E "versionCode|versionName" android/app/build.gradle
 
-    - name: Verify plugins registered
+    - name: Generate and inject icons via Gradle doLast hook
       run: |
-        echo "=== capacitor.config.json (runtime) ==="
-        cat android/app/src/main/assets/capacitor.config.json 2>/dev/null || echo "Not found"
+        if [ -f "assets/icon.png" ]; then
+          echo "✅ Icon found — generating sizes..."
+          pip install Pillow --quiet
+
+          python3 << 'EOF'
+        from PIL import Image
+        import os
+
+        src = "assets/icon.png"
+        img = Image.open(src).convert("RGBA")
+
+        sizes = {
+            "mipmap-mdpi":    48,
+            "mipmap-hdpi":    72,
+            "mipmap-xhdpi":   96,
+            "mipmap-xxhdpi":  144,
+            "mipmap-xxxhdpi": 192,
+        }
+
+        for folder, size in sizes.items():
+            out_dir = f"android/app/src/main/res/{folder}"
+            os.makedirs(out_dir, exist_ok=True)
+            resized = img.resize((size, size), Image.LANCZOS)
+            resized.save(f"{out_dir}/ic_launcher.png")
+            resized.save(f"{out_dir}/ic_launcher_round.png")
+            print(f"✅ {folder}: {size}x{size}px")
+        EOF
+
+          # Gradle ko force karo ke resources dobara merge kare
+          # mergeDebugResources task ki output delete karo — cache invalidate
+          rm -rf android/app/build/intermediates/merged_res/
+          rm -rf android/app/build/intermediates/packaged_res/
+          rm -rf android/app/build/intermediates/res/merged/
+          echo "✅ Gradle resource cache cleared — fresh merge hogi"
+        else
+          echo "⚠️ assets/icon.png not found — default icon use hoga"
+        fi
 
     - name: Add Permissions to AndroidManifest
       run: |
@@ -77,7 +112,6 @@ jobs:
         <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
         sed -i '/<manifest/a\
         <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
-        cat "$MANIFEST"
 
     - name: Add AdMob App ID to AndroidManifest
       run: |
@@ -89,77 +123,13 @@ jobs:
         chmod +x gradlew
         ./gradlew assembleDebug
 
-    - name: Inject App Icon AFTER Gradle build (replaces merged resources)
+    - name: Verify icons in APK
       run: |
-        if [ -f "assets/icon.png" ]; then
-          echo "✅ Icon found — injecting into compiled APK resources..."
-          pip install Pillow --quiet
-
-          python3 << 'EOF'
-        from PIL import Image
-        import os, glob
-
-        src = "assets/icon.png"
-        img = Image.open(src).convert("RGBA")
-
-        # Gradle merges resources into build/intermediates — find the merged mipmap folders
-        # and ALSO replace source res folders (belt + suspenders approach)
-        targets = {
-            "mipmap-mdpi":    48,
-            "mipmap-hdpi":    72,
-            "mipmap-xhdpi":   96,
-            "mipmap-xxhdpi":  144,
-            "mipmap-xxxhdpi": 192,
-        }
-
-        replaced = 0
-        # Find ALL ic_launcher.png files in android build tree and replace them
-        for path in glob.glob("android/**/ic_launcher.png", recursive=True):
-            # Skip test/debug folders we don't care about
-            folder_name = os.path.basename(os.path.dirname(path))
-            size = None
-            for key, s in targets.items():
-                if key in path:
-                    size = s
-                    break
-            if size:
-                resized = img.resize((size, size), Image.LANCZOS)
-                resized.save(path)
-                replaced += 1
-                print(f"✅ Replaced: {path} ({size}x{size})")
-
-        for path in glob.glob("android/**/ic_launcher_round.png", recursive=True):
-            folder_name = os.path.basename(os.path.dirname(path))
-            size = None
-            for key, s in targets.items():
-                if key in path:
-                    size = s
-                    break
-            if size:
-                resized = img.resize((size, size), Image.LANCZOS)
-                resized.save(path)
-                replaced += 1
-                print(f"✅ Replaced round: {path} ({size}x{size})")
-
-        print(f"\nTotal files replaced: {replaced}")
-        EOF
-        else
-          echo "⚠️ assets/icon.png not found — default Capacitor icon use hoga"
-        fi
-
-    - name: Repackage APK with new icons
-      run: |
-        if [ -f "assets/icon.png" ]; then
-          echo "Repackaging APK with updated icons..."
-          cd android
-          chmod +x gradlew
-          # packageDebug sirf APK packaging karta hai — compile skip hoga (cached)
-          ./gradlew packageDebug
-          echo "✅ APK repackaged with custom icons"
-        fi
+        echo "=== Icons inside APK ==="
+        unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -i "mipmap\|ic_launcher" || echo "No mipmap found"
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: dm21-v2.1.apk
-        path: android/app/build/outputs/apk/debug/app-debug.apk
+        path: android/app/build/outputs/apk/debug/Discount Manager.apk
