@@ -48,6 +48,40 @@ jobs:
     - name: Sync Capacitor (registers native plugins)
       run: npx @capacitor/cli sync android
 
+    - name: Set Version Code and Version Name
+      run: |
+        sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
+        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
+        echo "=== Version check ==="
+        grep -E "versionCode|versionName" android/app/build.gradle
+
+    - name: Set App Icon
+      run: |
+        if [ -f "assets/icon.png" ]; then
+          echo "✅ Icon found, generating all sizes..."
+          npm install -g cordova-res
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          npm install -g sharp-cli
+          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png resize 48 48
+          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png resize 72 72
+          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png resize 96 96
+          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png resize 144 144
+          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png resize 192 192
+          # Round icons bhi banao (Android 8.0+)
+          cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+          echo "✅ All icon sizes generated"
+        else
+          echo "⚠️ assets/icon.png not found — default Capacitor icon use hoga"
+        fi
+
     - name: Verify plugins registered in MainActivity / capacitor.config
       run: |
         echo "=== capacitor.config.json (runtime) ==="
@@ -99,5 +133,5 @@ jobs:
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: dm21-debug.apk
+        name: dm21-v2.1.apk
         path: android/app/build/outputs/apk/debug/app-debug.apk
