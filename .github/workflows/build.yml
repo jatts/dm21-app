@@ -51,33 +51,40 @@ jobs:
     - name: Set Version Code and Version Name
       run: |
         sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
-        sed -i 's/versionName "[^"]*"/versionName "2.0"/' android/app/build.gradle
+        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
         echo "=== Version check ==="
         grep -E "versionCode|versionName" android/app/build.gradle
 
-    - name: Set App Icon
+    - name: Set App Icon (Python + Pillow — reliable resize)
       run: |
         if [ -f "assets/icon.png" ]; then
-          echo "✅ Icon found, generating all sizes..."
-          npm install -g cordova-res
-          mkdir -p android/app/src/main/res/mipmap-mdpi
-          mkdir -p android/app/src/main/res/mipmap-hdpi
-          mkdir -p android/app/src/main/res/mipmap-xhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
-          npm install -g sharp-cli
-          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png resize 48 48
-          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png resize 72 72
-          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png resize 96 96
-          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png resize 144 144
-          npx sharp -i assets/icon.png -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png resize 192 192
-          # Round icons bhi banao (Android 8.0+)
-          cp android/app/src/main/res/mipmap-mdpi/ic_launcher.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-hdpi/ic_launcher.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-xhdpi/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
-          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
-          echo "✅ All icon sizes generated"
+          echo "✅ Icon found, generating all sizes with Pillow..."
+          pip install Pillow --quiet
+          python3 << 'EOF'
+        from PIL import Image
+        import os, shutil
+
+        src = "assets/icon.png"
+        sizes = {
+            "mipmap-mdpi":     48,
+            "mipmap-hdpi":     72,
+            "mipmap-xhdpi":    96,
+            "mipmap-xxhdpi":   144,
+            "mipmap-xxxhdpi":  192,
+        }
+
+        img = Image.open(src).convert("RGBA")
+
+        for folder, size in sizes.items():
+            out_dir = f"android/app/src/main/res/{folder}"
+            os.makedirs(out_dir, exist_ok=True)
+            resized = img.resize((size, size), Image.LANCZOS)
+            resized.save(f"{out_dir}/ic_launcher.png")
+            resized.save(f"{out_dir}/ic_launcher_round.png")
+            print(f"✅ {folder}: {size}x{size}px done")
+
+        print("All icons generated!")
+        EOF
         else
           echo "⚠️ assets/icon.png not found — default Capacitor icon use hoga"
         fi
