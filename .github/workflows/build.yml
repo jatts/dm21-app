@@ -55,10 +55,10 @@ jobs:
         echo "=== Version check ==="
         grep -E "versionCode|versionName" android/app/build.gradle
 
-    - name: Generate and inject icons via Gradle doLast hook
+    - name: Set App Icon (adaptive + legacy both)
       run: |
         if [ -f "assets/icon.png" ]; then
-          echo "✅ Icon found — generating sizes..."
+          echo "✅ Icon found — setting all icon types..."
           pip install Pillow --quiet
 
           python3 << 'EOF'
@@ -68,6 +68,7 @@ jobs:
         src = "assets/icon.png"
         img = Image.open(src).convert("RGBA")
 
+        # 1. Legacy PNG icons (Android < 8.0)
         sizes = {
             "mipmap-mdpi":    48,
             "mipmap-hdpi":    72,
@@ -75,22 +76,86 @@ jobs:
             "mipmap-xxhdpi":  144,
             "mipmap-xxxhdpi": 192,
         }
-
         for folder, size in sizes.items():
             out_dir = f"android/app/src/main/res/{folder}"
             os.makedirs(out_dir, exist_ok=True)
             resized = img.resize((size, size), Image.LANCZOS)
             resized.save(f"{out_dir}/ic_launcher.png")
             resized.save(f"{out_dir}/ic_launcher_round.png")
-            print(f"✅ {folder}: {size}x{size}px")
+            print(f"✅ PNG {folder}: {size}x{size}px")
+
+        # 2. Adaptive icon foreground (Android 8.0+)
+        # 108x108dp required (xxxhdpi = 432px with safe zone padding)
+        # Safe zone: icon should be 66dp = 264px centered in 432px
+        adaptive_dir = "android/app/src/main/res/mipmap-xxxhdpi"
+        os.makedirs(adaptive_dir, exist_ok=True)
+        fg = img.resize((432, 432), Image.LANCZOS)
+        fg.save(f"{adaptive_dir}/ic_launcher_foreground.png")
+        print("✅ Adaptive foreground (432x432) saved")
+
+        # Also save foreground for all densities
+        fg_sizes = {
+            "mipmap-mdpi":    108,
+            "mipmap-hdpi":    162,
+            "mipmap-xhdpi":   216,
+            "mipmap-xxhdpi":  324,
+            "mipmap-xxxhdpi": 432,
+        }
+        for folder, size in fg_sizes.items():
+            out_dir = f"android/app/src/main/res/{folder}"
+            resized = img.resize((size, size), Image.LANCZOS)
+            resized.save(f"{out_dir}/ic_launcher_foreground.png")
+            print(f"✅ Foreground {folder}: {size}x{size}px")
+
+        print("All icons done!")
         EOF
 
-          # Gradle ko force karo ke resources dobara merge kare
-          # mergeDebugResources task ki output delete karo — cache invalidate
+          # 3. ic_launcher_background ko white/solid color se replace karo
+          cat > android/app/src/main/res/drawable/ic_launcher_background.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <shape xmlns:android="http://schemas.android.com/apk/res/android">
+            <solid android:color="#FFFFFF"/>
+        </shape>
+        XML
+          echo "✅ Background set to white"
+
+          # 4. mipmap-anydpi-v26/ic_launcher.xml — adaptive icon definition
+          # Yeh file Android 8+ pe use hoti hai — foreground aur background define karta hai
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@drawable/ic_launcher_background"/>
+            <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+        </adaptive-icon>
+        XML
+
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@drawable/ic_launcher_background"/>
+            <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+        </adaptive-icon>
+        XML
+          echo "✅ Adaptive icon XMLs updated"
+
+          # 5. drawable-anydpi-v24 foreground XML bhi update karo
+          mkdir -p android/app/src/main/res/drawable-anydpi-v24
+          cat > android/app/src/main/res/drawable-anydpi-v24/ic_launcher_foreground.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+            <item>
+                <bitmap android:src="@mipmap/ic_launcher_foreground" android:gravity="center"/>
+            </item>
+        </layer-list>
+        XML
+          echo "✅ Foreground drawable XML updated"
+
+          # Gradle cache clear karo
           rm -rf android/app/build/intermediates/merged_res/
           rm -rf android/app/build/intermediates/packaged_res/
-          rm -rf android/app/build/intermediates/res/merged/
-          echo "✅ Gradle resource cache cleared — fresh merge hogi"
+          rm -rf android/app/build/intermediates/res/
+          echo "✅ Gradle resource cache cleared"
         else
           echo "⚠️ assets/icon.png not found — default icon use hoga"
         fi
