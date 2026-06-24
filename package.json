@@ -2,7 +2,7 @@
   "name": "dm21-app",
   "version": "1.0.0",
   "dependencies": {
-    "@capacitor/core": "^6.0.0",
+    "@capacitor/core": "^7.0.0",
     "@capacitor/app": "^6.0.0",
     "@capacitor/android": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",
