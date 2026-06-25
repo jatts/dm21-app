@@ -175,6 +175,35 @@ jobs:
           echo "⚠️ assets/icon.png not found — default icon use hoga"
         fi
 
+    - name: Patch MainActivity for OneSignal (onesignal-cordova-plugin requirement)
+      run: |
+        MAIN=$(find android -name "MainActivity.java" | head -1)
+        if [ -z "$MAIN" ]; then
+          echo "❌ MainActivity.java not found"
+          exit 1
+        fi
+        echo "Found: $MAIN"
+
+        # Check already patched nahi hai
+        if grep -q "OneSignal" "$MAIN"; then
+          echo "✅ MainActivity already has OneSignal"
+        else
+          # import add karo
+          sed -i 's/import com.getcapacitor.BridgeActivity;/import com.getcapacitor.BridgeActivity;
+import com.onesignal.OneSignal;
+import com.onesignal.debug.LogLevel;/' "$MAIN"
+
+          # onCreate mein OneSignal init add karo
+          sed -i 's/super.onCreate(savedInstanceState);/super.onCreate(savedInstanceState);
+
+        \/\/ OneSignal init
+        OneSignal.getDebug().setLogLevel(LogLevel.VERBOSE);
+        OneSignal.initWithContext(this, "f9e441e6-0852-4f55-82b4-066379edc977");/' "$MAIN"
+
+          echo "✅ MainActivity patched with OneSignal"
+          cat "$MAIN"
+        fi
+
     - name: Add Permissions to AndroidManifest
       run: |
         MANIFEST=android/app/src/main/AndroidManifest.xml
