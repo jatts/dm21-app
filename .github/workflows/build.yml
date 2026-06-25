@@ -29,11 +29,10 @@ jobs:
         rm -rf node_modules package-lock.json
         npm install --legacy-peer-deps
 
-    # 🔥 Install OneSignal Capacitor plugin (remove cordova one if exists)
     - name: Install OneSignal Capacitor plugin
       run: |
         npm uninstall onesignal-cordova-plugin 2>/dev/null || true
-        npm install @onesignal/capacitor-plugin
+        npm install @onesignal/capacitor-plugin --legacy-peer-deps
 
     - name: Verify Capacitor plugins
       run: |
