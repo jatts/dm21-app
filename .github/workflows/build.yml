@@ -113,10 +113,17 @@ jobs:
           echo "✅ Added default_notification_icon"
         fi
 
-        # 4. Add AdMob meta-data (if ADMOB_APP_ID secret is set)
+        # 4. Add AdMob App ID (test ID if secret not set)
         if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
-          sed -i '/<application>/a\        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>' "$MANIFEST"
-          echo "✅ Added AdMob App ID"
+          ADMOB_ID="${{ secrets.ADMOB_APP_ID }}"
+          if [ -z "$ADMOB_ID" ]; then
+            ADMOB_ID="ca-app-pub-3940256099942544~3347511713"
+            echo "⚠️ ADMOB_APP_ID secret not set — using test ID"
+          fi
+          sed -i '/<application>/a\        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="'"$ADMOB_ID"'"/>' "$MANIFEST"
+          echo "✅ AdMob App ID added"
+        else
+          echo "ℹ️ AdMob App ID already present"
         fi
 
         echo "=== Final AndroidManifest.xml ==="
