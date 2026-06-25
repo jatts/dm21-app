@@ -83,85 +83,44 @@ jobs:
     - name: Sync Capacitor
       run: npx @capacitor/cli sync android
 
-    # ─── SAFE MANIFEST PATCHING ───
-    - name: Patch AndroidManifest.xml with FCM meta-data
+    # ─── SAFE MANIFEST PATCHING USING TEXT MANIPULATION ───
+    - name: Patch AndroidManifest.xml with permissions and meta-data
       run: |
-        python3 << 'PYEOF'
-        import xml.etree.ElementTree as ET
-        import os
+        MANIFEST=android/app/src/main/AndroidManifest.xml
 
-        manifest_path = 'android/app/src/main/AndroidManifest.xml'
-        if not os.path.exists(manifest_path):
-            print(f"❌ Manifest not found at {manifest_path}")
-            exit(1)
+        # 1. Ensure manifest has xmlns:android declaration
+        if ! grep -q 'xmlns:android' "$MANIFEST"; then
+          echo "❌ xmlns:android missing — adding it"
+          sed -i 's|<manifest |<manifest xmlns:android="http://schemas.android.com/apk/res/android" |' "$MANIFEST"
+        fi
 
-        ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
-        tree = ET.parse(manifest_path)
-        root = tree.getroot()
-        application = root.find('application')
-        if application is None:
-            print("❌ <application> tag not found")
-            exit(1)
+        # 2. Add permissions (if missing)
+        for perm in CAMERA INTERNET ACCESS_NETWORK_STATE VIBRATE POST_NOTIFICATIONS WAKE_LOCK; do
+          if ! grep -q "android.permission.$perm" "$MANIFEST"; then
+            sed -i "/<manifest/a\    <uses-permission android:name=\"android.permission.$perm\" />" "$MANIFEST"
+            echo "✅ Added $perm"
+          fi
+        done
 
-        def meta_exists(name):
-            for child in application:
-                if child.tag == 'meta-data' and child.get('{http://schemas.android.com/apk/res/android}name') == name:
-                    return True
-            return False
+        # 3. Add FCM meta-data under <application>
+        if ! grep -q "com.google.firebase.messaging.default_notification_channel_id" "$MANIFEST"; then
+          sed -i '/<application>/a\        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default" />' "$MANIFEST"
+          echo "✅ Added default_notification_channel_id"
+        fi
 
-        if not meta_exists('com.google.firebase.messaging.default_notification_channel_id'):
-            meta = ET.SubElement(application, 'meta-data')
-            meta.set('{http://schemas.android.com/apk/res/android}name', 'com.google.firebase.messaging.default_notification_channel_id')
-            meta.set('{http://schemas.android.com/apk/res/android}value', 'default')
-            print("✅ Added default_notification_channel_id")
+        if ! grep -q "com.google.firebase.messaging.default_notification_icon" "$MANIFEST"; then
+          sed -i '/<application>/a\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_launcher" />' "$MANIFEST"
+          echo "✅ Added default_notification_icon"
+        fi
 
-        if not meta_exists('com.google.firebase.messaging.default_notification_icon'):
-            meta = ET.SubElement(application, 'meta-data')
-            meta.set('{http://schemas.android.com/apk/res/android}name', 'com.google.firebase.messaging.default_notification_icon')
-            meta.set('{http://schemas.android.com/apk/res/android}resource', '@drawable/ic_launcher')
-            print("✅ Added default_notification_icon")
+        # 4. Add AdMob meta-data (if ADMOB_APP_ID secret is set)
+        if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
+          sed -i '/<application>/a\        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>' "$MANIFEST"
+          echo "✅ Added AdMob App ID"
+        fi
 
-        tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
-        print("✅ Manifest patched successfully")
-        PYEOF
-
-    - name: Add Permissions to AndroidManifest
-      run: |
-        python3 << 'PYEOF'
-        import xml.etree.ElementTree as ET
-        import os
-
-        manifest_path = 'android/app/src/main/AndroidManifest.xml'
-        tree = ET.parse(manifest_path)
-        root = tree.getroot()
-        ns = {'android': 'http://schemas.android.com/apk/res/android'}
-
-        permissions = [
-            'android.permission.CAMERA',
-            'android.permission.INTERNET',
-            'android.permission.ACCESS_NETWORK_STATE',
-            'android.permission.VIBRATE',
-            'android.permission.POST_NOTIFICATIONS',
-            'android.permission.WAKE_LOCK'
-        ]
-
-        existing = set()
-        for child in root:
-            if child.tag == 'uses-permission':
-                name = child.get('{http://schemas.android.com/apk/res/android}name')
-                if name:
-                    existing.add(name)
-
-        for perm in permissions:
-            if perm not in existing:
-                elem = ET.Element('uses-permission')
-                elem.set('{http://schemas.android.com/apk/res/android}name', perm)
-                root.insert(0, elem)
-                print(f"✅ Added {perm}")
-
-        tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
-        print("✅ Permissions added")
-        PYEOF
+        echo "=== Final AndroidManifest.xml ==="
+        cat "$MANIFEST"
 
     - name: Add Firebase Messaging dependency to build.gradle
       run: |
@@ -255,38 +214,6 @@ jobs:
         else
           echo "⚠️ No icon found"
         fi
-
-    - name: Add AdMob App ID to AndroidManifest
-      run: |
-        python3 << 'PYEOF'
-        import xml.etree.ElementTree as ET
-        import os
-
-        manifest_path = 'android/app/src/main/AndroidManifest.xml'
-        tree = ET.parse(manifest_path)
-        root = tree.getroot()
-        application = root.find('application')
-
-        if application is None:
-            print("❌ <application> not found")
-            exit(1)
-
-        # Check if AdMob meta-data exists
-        exists = False
-        for child in application:
-            if child.tag == 'meta-data' and child.get('{http://schemas.android.com/apk/res/android}name') == 'com.google.android.gms.ads.APPLICATION_ID':
-                exists = True
-                break
-
-        if not exists:
-            meta = ET.SubElement(application, 'meta-data')
-            meta.set('{http://schemas.android.com/apk/res/android}name', 'com.google.android.gms.ads.APPLICATION_ID')
-            meta.set('{http://schemas.android.com/apk/res/android}value', '${{ secrets.ADMOB_APP_ID }}')
-            print("✅ Added AdMob App ID")
-            tree.write(manifest_path, encoding='utf-8', xml_declaration=True)
-        else:
-            print("ℹ️ AdMob App ID already exists")
-        PYEOF
 
     - name: Build Debug APK
       run: |
