@@ -32,7 +32,7 @@ jobs:
     # ─── INSTALL PUSH NOTIFICATIONS PLUGIN ───
     - name: Install @capacitor/push-notifications
       run: |
-        npm install @capacitor/push-notifications
+        npm install @capacitor/push-notifications --legacy-peer-deps
 
     - name: Verify Capacitor plugins
       run: |
