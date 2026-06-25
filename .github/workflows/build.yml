@@ -40,37 +40,6 @@ jobs:
     - name: Install Capacitor CLI globally
       run: npm install -g @capacitor/cli
 
-    # ========== 🔥 FIX: Validate & fix capacitor.config.json ==========
-    - name: Validate and fix capacitor.config.json
-      run: |
-        echo "=== Current capacitor.config.json ==="
-        cat capacitor.config.json
-        echo ""
-        python3 << 'PYEOF'
-        import json, sys, os
-        try:
-            with open('capacitor.config.json', 'r') as f:
-                config = json.load(f)
-            print("✅ JSON is valid.")
-            if 'appId' not in config:
-                print("❌ appId missing, adding it...")
-                config['appId'] = 'com.Rizwan.dm'
-                if 'appName' not in config:
-                    config['appName'] = 'Discount Manager'
-                if 'webDir' not in config:
-                    config['webDir'] = 'www'
-                with open('capacitor.config.json', 'w') as f:
-                    json.dump(config, f, indent=2)
-                print("✅ Fixed config with appId")
-            else:
-                print("✅ appId exists:", config['appId'])
-        except json.JSONDecodeError as e:
-            print("❌ JSON syntax error:", e)
-            sys.exit(1)
-        PYEOF
-        echo "=== After validation/fix ==="
-        cat capacitor.config.json
-
     - name: Remove old android folder
       run: rm -rf android
 
