@@ -8,97 +8,210 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Clean install dependencies
-        run: |
-          rm -rf node_modules package-lock.json
-          npm install --legacy-peer-deps
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
 
-      - name: Install OneSignal Capacitor plugin
-        run: |
-          npm uninstall onesignal-cordova-plugin 2>/dev/null || true
-          npm install @onesignal/capacitor-plugin --legacy-peer-deps
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
 
-      - name: Verify Capacitor plugins
-        run: |
-          echo "=== Checking plugins ==="
-          ls node_modules/@capacitor-community/admob/android/ && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
-          ls node_modules/@capacitor-community/text-to-speech/android/ && echo "✅ TTS present" || echo "❌ TTS MISSING"
-          ls node_modules/@capacitor/status-bar/android/ && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
-          ls node_modules/@onesignal/capacitor-plugin/android/ && echo "✅ OneSignal Capacitor plugin present" || echo "❌ OneSignal MISSING"
+    - name: Clean install dependencies
+      run: |
+        rm -rf node_modules package-lock.json
+        npm install --legacy-peer-deps
 
-      - name: Install Capacitor CLI
-        run: npm install -g @capacitor/cli
+    # ─── INSTALL PUSH NOTIFICATIONS PLUGIN ───
+    - name: Install @capacitor/push-notifications
+      run: |
+        npm install @capacitor/push-notifications
 
-      - name: Validate capacitor.config.json
-        run: |
-          python3 -c "
-          import json
-          with open('capacitor.config.json') as f:
-              config = json.load(f)
-          if 'appId' not in config:
-              config['appId'] = 'com.Rizwan.dm'
-              with open('capacitor.config.json', 'w') as f:
-                  json.dump(config, f, indent=2)
-          print('✅ appId:', config.get('appId'))
-          "
+    - name: Verify Capacitor plugins
+      run: |
+        echo "=== Checking plugins ==="
+        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
+        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
+        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
+        ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ Push Notifications present" || echo "❌ Push Notifications MISSING"
 
-      - name: Remove old android
-        run: rm -rf android
+    - name: Install Capacitor CLI globally
+      run: npm install -g @capacitor/cli
 
-      - name: Add Android platform
-        run: npx cap add android
+    - name: Validate and fix capacitor.config.json
+      run: |
+        echo "=== Current config ==="
+        cat capacitor.config.json
+        echo ""
+        python3 << 'PYEOF'
+        import json, sys, os
+        try:
+            with open('capacitor.config.json', 'r') as f:
+                config = json.load(f)
+            print("✅ JSON is valid.")
+            if 'appId' not in config:
+                print("❌ appId missing, adding it...")
+                config['appId'] = 'com.Rizwan.dm'
+                if 'appName' not in config:
+                    config['appName'] = 'Discount Manager'
+                if 'webDir' not in config:
+                    config['webDir'] = 'www'
+                with open('capacitor.config.json', 'w') as f:
+                    json.dump(config, f, indent=2)
+                print("✅ Fixed config with appId")
+            else:
+                print("✅ appId exists:", config['appId'])
+        except json.JSONDecodeError as e:
+            print("❌ JSON syntax error:", e)
+            sys.exit(1)
+        PYEOF
+        echo "=== After validation ==="
+        cat capacitor.config.json
 
-      - name: Sync Capacitor
-        run: npx cap sync android
+    - name: Remove old android folder
+      run: rm -rf android
 
-      - name: Copy google-services.json
-        run: |
-          if [ -f "google-services.json" ]; then
-            cp google-services.json android/app/
-          else
-            echo "❌ google-services.json missing"
-            exit 1
+    - name: Add Android platform
+      run: npx @capacitor/cli add android
+
+    - name: Sync Capacitor
+      run: npx @capacitor/cli sync android
+
+    # ─── PATCH ANDROID MANIFEST & GRADLE FOR FCM ───
+    - name: Patch AndroidManifest.xml for FCM
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+        # Add default notification channel and icon metadata
+        sed -i '/<application/a\        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default" />' "$MANIFEST"
+        sed -i '/<application/a\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_launcher" />' "$MANIFEST"
+        echo "✅ AndroidManifest patched"
+
+    - name: Add Firebase Messaging dependency to build.gradle
+      run: |
+        GRADLE=android/app/build.gradle
+        # Check if already present
+        if ! grep -q "firebase-messaging" "$GRADLE"; then
+          sed -i '/dependencies {/a\    implementation "com.google.firebase:firebase-messaging:23.4.0"' "$GRADLE"
+          echo "✅ Firebase Messaging dependency added"
+        else
+          echo "ℹ️ Firebase Messaging already present"
+        fi
+        grep -A 2 "dependencies {" "$GRADLE" || true
+
+    - name: Copy google-services.json
+      run: |
+        if [ -f "google-services.json" ]; then
+          cp google-services.json android/app/google-services.json
+          echo "✅ google-services.json copied"
+        else
+          echo "❌ google-services.json NOT FOUND"
+          exit 1
+        fi
+
+    - name: Set Version Code and Version Name
+      run: |
+        sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
+        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
+        echo "=== Version check ==="
+        grep -E "versionCode|versionName" android/app/build.gradle
+
+    - name: Set App Icon
+      run: |
+        if [ -f "assets/icon.png" ]; then
+          pip install Pillow --quiet
+          python3 << 'PYEOF'
+        from PIL import Image
+        import os
+
+        src = "assets/icon.png"
+        img = Image.open(src).convert("RGBA")
+
+        sizes = {
+            "mipmap-mdpi": 48, "mipmap-hdpi": 72,
+            "mipmap-xhdpi": 96, "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192,
+        }
+        for folder, size in sizes.items():
+            d = f"android/app/src/main/res/{folder}"
+            os.makedirs(d, exist_ok=True)
+            r = img.resize((size, size), Image.LANCZOS)
+            r.save(f"{d}/ic_launcher.png")
+            r.save(f"{d}/ic_launcher_round.png")
+            print(f"✅ {folder}: {size}px")
+
+        def make_fg(img, canvas):
+            icon = int(canvas * 0.61)
+            pad = (canvas - icon) // 2
+            c = Image.new("RGBA", (canvas, canvas), (0,0,0,0))
+            c.paste(img.resize((icon,icon), Image.LANCZOS), (pad,pad), img.resize((icon,icon), Image.LANCZOS))
+            return c
+
+        fg = {"mipmap-mdpi":108,"mipmap-hdpi":162,"mipmap-xhdpi":216,"mipmap-xxhdpi":324,"mipmap-xxxhdpi":432}
+        for folder, size in fg.items():
+            d = f"android/app/src/main/res/{folder}"
+            os.makedirs(d, exist_ok=True)
+            make_fg(img, size).save(f"{d}/ic_launcher_foreground.png")
+            print(f"✅ FG {folder}: {size}px")
+        PYEOF
+
+          cat > android/app/src/main/res/drawable/ic_launcher_background.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <shape xmlns:android="http://schemas.android.com/apk/res/android">
+            <solid android:color="#FFFFFF"/>
+        </shape>
+        XML
+
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@drawable/ic_launcher_background"/>
+            <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+        </adaptive-icon>
+        XML
+
+          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@drawable/ic_launcher_background"/>
+            <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+        </adaptive-icon>
+        XML
+          echo "✅ Icons set"
+        else
+          echo "⚠️ No icon found"
+        fi
+
+    - name: Add Permissions to AndroidManifest
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+        for perm in CAMERA INTERNET ACCESS_NETWORK_STATE VIBRATE POST_NOTIFICATIONS WAKE_LOCK; do
+          if ! grep -q "android.permission.$perm" "$MANIFEST"; then
+            sed -i "/<manifest/a\    <uses-permission android:name=\"android.permission.$perm\" />" "$MANIFEST"
           fi
+        done
 
-      - name: Set version
-        run: |
-          sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
-          sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
+    - name: Add AdMob App ID to AndroidManifest
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+        if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
+          sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' "$MANIFEST"
+        fi
 
-      - name: Set App Icon
-        run: |
-          # (same icon generation as before)
-          # ... (keep existing icon script) ...
+    - name: Build Debug APK
+      run: |
+        cd android
+        chmod +x gradlew
+        ./gradlew assembleDebug
 
-      - name: Add permissions
-        run: |
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          for perm in CAMERA INTERNET ACCESS_NETWORK_STATE VIBRATE POST_NOTIFICATIONS WAKE_LOCK; do
-            sed -i "/<manifest/a\    <uses-permission android:name=\"android.permission.$perm\" />" $MANIFEST
-          done
-
-      - name: Add AdMob App ID
-        run: |
-          sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' android/app/src/main/AndroidManifest.xml
-
-      - name: Build APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: dm21-v2.1.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: dm21-v2.1.apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
