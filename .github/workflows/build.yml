@@ -237,6 +237,7 @@ import com.onesignal.debug.LogLevel;/' "$MAIN"
         echo "=== Icons inside APK ==="
         unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -i "mipmap\|ic_launcher" || echo "No mipmap found"
 
+
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
