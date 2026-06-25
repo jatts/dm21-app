@@ -83,59 +83,127 @@ jobs:
     - name: Sync Capacitor
       run: npx @capacitor/cli sync android
 
-    # ─── TEXT-BASED MANIFEST PATCHING (NO XML PARSING) ───
-    - name: Patch AndroidManifest.xml using sed
+    # ─── ROBUST MANIFEST PATCHING USING PYTHON TEXT MANIPULATION ───
+    - name: Patch AndroidManifest.xml safely
       run: |
-        MANIFEST=android/app/src/main/AndroidManifest.xml
-        echo "=== Original manifest ==="
-        cat "$MANIFEST"
+        python3 << 'PYEOF'
+        import os
+        import re
 
-        # 1. Ensure xmlns:android exists
-        if ! grep -q 'xmlns:android' "$MANIFEST"; then
-          sed -i 's|<manifest |<manifest xmlns:android="http://schemas.android.com/apk/res/android" |' "$MANIFEST"
-          echo "✅ Added xmlns:android"
-        fi
+        manifest_path = 'android/app/src/main/AndroidManifest.xml'
+        if not os.path.exists(manifest_path):
+            print(f"❌ Manifest not found at {manifest_path}")
+            exit(1)
 
-        # 2. Add permissions after <manifest>
-        for perm in CAMERA INTERNET ACCESS_NETWORK_STATE VIBRATE POST_NOTIFICATIONS WAKE_LOCK; do
-          if ! grep -q "android.permission.$perm" "$MANIFEST"; then
-            sed -i "/<manifest/a\    <uses-permission android:name=\"android.permission.$perm\" />" "$MANIFEST"
-            echo "✅ Added $perm"
-          fi
-        done
+        # Read the entire file
+        with open(manifest_path, 'r') as f:
+            lines = f.readlines()
 
-        # 3. Add meta-data inside <application>
-        # First, find the line number of <application> tag
-        APP_LINE=$(grep -n "<application" "$MANIFEST" | head -1 | cut -d: -f1)
-        if [ -n "$APP_LINE" ]; then
-          # Insert FCM meta-data after <application> line
-          if ! grep -q "com.google.firebase.messaging.default_notification_channel_id" "$MANIFEST"; then
-            sed -i "${APP_LINE}a\        <meta-data android:name=\"com.google.firebase.messaging.default_notification_channel_id\" android:value=\"default\" />" "$MANIFEST"
-            echo "✅ Added default_notification_channel_id"
-          fi
+        # Step 1: Ensure xmlns:android is present in <manifest>
+        manifest_line_index = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith('<manifest'):
+                manifest_line_index = i
+                if 'xmlns:android' not in line:
+                    lines[i] = line.replace('<manifest', '<manifest xmlns:android="http://schemas.android.com/apk/res/android"')
+                    print("✅ Added xmlns:android")
+                break
 
-          if ! grep -q "com.google.firebase.messaging.default_notification_icon" "$MANIFEST"; then
-            sed -i "${APP_LINE}a\        <meta-data android:name=\"com.google.firebase.messaging.default_notification_icon\" android:resource=\"@drawable/ic_launcher\" />" "$MANIFEST"
-            echo "✅ Added default_notification_icon"
-          fi
+        if manifest_line_index is None:
+            print("❌ <manifest> tag not found")
+            exit(1)
 
-          # Add AdMob App ID (use test ID if secret not set)
-          if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
-            ADMOB_ID="${{ secrets.ADMOB_APP_ID }}"
-            if [ -z "$ADMOB_ID" ]; then
-              ADMOB_ID="ca-app-pub-3940256099942544~3347511713"
-              echo "⚠️ ADMOB_APP_ID secret not set — using test ID"
-            fi
-            sed -i "${APP_LINE}a\        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"$ADMOB_ID\" />" "$MANIFEST"
-            echo "✅ Added AdMob App ID"
-          fi
-        else
-          echo "❌ <application> tag not found"
-          exit 1
-        fi
+        # Step 2: Add permissions after <manifest> (but before <application>)
+        # Collect existing permissions
+        existing_perms = set()
+        app_line_index = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith('<application'):
+                app_line_index = i
+                break
+            if line.strip().startswith('<uses-permission'):
+                match = re.search(r'android:name="([^"]+)"', line)
+                if match:
+                    existing_perms.add(match.group(1))
 
-        echo "=== Final manifest ==="
-        cat "$MANIFEST"
+        permissions_to_add = [
+            'android.permission.CAMERA',
+            'android.permission.INTERNET',
+            'android.permission.ACCESS_NETWORK_STATE',
+            'android.permission.VIBRATE',
+            'android.permission.POST_NOTIFICATIONS',
+            'android.permission.WAKE_LOCK'
+        ]
+
+        # Insert permissions just after the first <manifest> line (before any <uses-permission>)
+        insert_index = manifest_line_index + 1
+        for perm in permissions_to_add:
+            if perm not in existing_perms:
+                lines.insert(insert_index, f'    <uses-permission android:name="{perm}" />\n')
+                insert_index += 1
+                print(f"✅ Added {perm}")
+
+        if app_line_index is None:
+            print("❌ <application> tag not found")
+            exit(1)
+
+        # Step 3: Add meta-data inside <application> (after the <application> line)
+        # Find the line number of <application> (may have been shifted)
+        for i, line in enumerate(lines):
+            if line.strip().startswith('<application'):
+                app_line_index = i
+                break
+
+        # Check which meta-data already exist
+        existing_meta = set()
+        for line in lines:
+            if '<meta-data' in line:
+                match = re.search(r'android:name="([^"]+)"', line)
+                if match:
+                    existing_meta.add(match.group(1))
+
+        # Prepare meta-data lines to insert (with proper indentation)
+        meta_lines = []
+        if 'com.google.firebase.messaging.default_notification_channel_id' not in existing_meta:
+            meta_lines.append('        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default" />')
+        if 'com.google.firebase.messaging.default_notification_icon' not in existing_meta:
+            meta_lines.append('        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_launcher" />')
+        if 'com.google.android.gms.ads.APPLICATION_ID' not in existing_meta:
+            # Use secret or test ID
+            admob_id = os.environ.get('ADMOB_APP_ID')
+            if not admob_id:
+                admob_id = 'ca-app-pub-3940256099942544~3347511713'
+                print("⚠️ ADMOB_APP_ID secret not set — using test ID")
+            meta_lines.append(f'        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="{admob_id}" />')
+
+        # Insert meta-data after the <application> line (at app_line_index + 1)
+        if meta_lines:
+            insert_pos = app_line_index + 1
+            for meta_line in reversed(meta_lines):  # reverse to maintain order
+                lines.insert(insert_pos, meta_line + '\n')
+                print(f"✅ Added {meta_line.strip()}")
+
+        # Write back the modified content
+        with open(manifest_path, 'w') as f:
+            f.writelines(lines)
+
+        print("✅ Manifest patched successfully")
+
+        # Validate XML by parsing with ElementTree (optional)
+        try:
+            import xml.etree.ElementTree as ET
+            ET.parse(manifest_path)
+            print("✅ XML validation passed")
+        except Exception as e:
+            print(f"⚠️ XML validation warning: {e}")
+
+        # Print final manifest for debugging
+        print("=== Final AndroidManifest.xml ===")
+        with open(manifest_path, 'r') as f:
+            print(f.read())
+        PYEOF
+      env:
+        ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
 
     - name: Add Firebase Messaging dependency to build.gradle
       run: |
