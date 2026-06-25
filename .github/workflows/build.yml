@@ -29,16 +29,52 @@ jobs:
         rm -rf node_modules package-lock.json
         npm install --legacy-peer-deps
 
-    - name: Verify Capacitor plugins installed
+    # 🔥 Install OneSignal Capacitor plugin (remove cordova one if exists)
+    - name: Install OneSignal Capacitor plugin
       run: |
-        echo "=== Checking node_modules for plugins ==="
+        npm uninstall onesignal-cordova-plugin 2>/dev/null || true
+        npm install @onesignal/capacitor-plugin
+
+    - name: Verify Capacitor plugins
+      run: |
+        echo "=== Checking plugins ==="
         ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
         ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
         ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
-        ls node_modules/onesignal-cordova-plugin/src/android/ 2>/dev/null && echo "✅ OneSignal present" || echo "❌ OneSignal MISSING"
+        ls node_modules/@onesignal/capacitor-plugin/android/ 2>/dev/null && echo "✅ OneSignal Capacitor plugin present" || echo "❌ OneSignal MISSING"
 
     - name: Install Capacitor CLI globally
       run: npm install -g @capacitor/cli
+
+    - name: Validate and fix capacitor.config.json
+      run: |
+        echo "=== Current config ==="
+        cat capacitor.config.json
+        echo ""
+        python3 << 'PYEOF'
+        import json, sys, os
+        try:
+            with open('capacitor.config.json', 'r') as f:
+                config = json.load(f)
+            print("✅ JSON is valid.")
+            if 'appId' not in config:
+                print("❌ appId missing, adding it...")
+                config['appId'] = 'com.Rizwan.dm'
+                if 'appName' not in config:
+                    config['appName'] = 'Discount Manager'
+                if 'webDir' not in config:
+                    config['webDir'] = 'www'
+                with open('capacitor.config.json', 'w') as f:
+                    json.dump(config, f, indent=2)
+                print("✅ Fixed config with appId")
+            else:
+                print("✅ appId exists:", config['appId'])
+        except json.JSONDecodeError as e:
+            print("❌ JSON syntax error:", e)
+            sys.exit(1)
+        PYEOF
+        echo "=== After validation ==="
+        cat capacitor.config.json
 
     - name: Remove old android folder
       run: rm -rf android
