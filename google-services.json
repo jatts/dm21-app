@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "473173584222",
+    "project_id": "discount-manager-app",
+    "storage_bucket": "discount-manager-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:473173584222:android:b3fc4f6823c11cd1ed47cf",
+        "android_client_info": {
+          "package_name": "com.Rizwan.dm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYbqfQXVG0tsDuuiQMrZG7ihYaZT268PI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
