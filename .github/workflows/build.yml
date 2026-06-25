@@ -83,127 +83,73 @@ jobs:
     - name: Sync Capacitor
       run: npx @capacitor/cli sync android
 
-    # ─── ROBUST MANIFEST PATCHING USING PYTHON TEXT MANIPULATION ───
-    - name: Patch AndroidManifest.xml safely
+    # ─── CREATE A CLEAN, VALID AndroidManifest.xml ───
+    - name: Create a clean AndroidManifest.xml
       run: |
-        python3 << 'PYEOF'
-        import os
-        import re
+        cat > android/app/src/main/AndroidManifest.xml << 'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+            package="com.Rizwan.dm">
 
-        manifest_path = 'android/app/src/main/AndroidManifest.xml'
-        if not os.path.exists(manifest_path):
-            print(f"❌ Manifest not found at {manifest_path}")
-            exit(1)
+            <!-- Permissions -->
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+            <uses-permission android:name="android.permission.CAMERA" />
+            <uses-permission android:name="android.permission.VIBRATE" />
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+            <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-        # Read the entire file
-        with open(manifest_path, 'r') as f:
-            lines = f.readlines()
+            <application
+                android:allowBackup="true"
+                android:icon="@mipmap/ic_launcher"
+                android:label="@string/app_name"
+                android:roundIcon="@mipmap/ic_launcher_round"
+                android:supportsRtl="true"
+                android:theme="@style/AppTheme">
 
-        # Step 1: Ensure xmlns:android is present in <manifest>
-        manifest_line_index = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith('<manifest'):
-                manifest_line_index = i
-                if 'xmlns:android' not in line:
-                    lines[i] = line.replace('<manifest', '<manifest xmlns:android="http://schemas.android.com/apk/res/android"')
-                    print("✅ Added xmlns:android")
-                break
+                <activity
+                    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                    android:name="com.Rizwan.dm.MainActivity"
+                    android:label="@string/app_name"
+                    android:theme="@style/AppTheme.NoActionBarLaunch"
+                    android:exported="true">
 
-        if manifest_line_index is None:
-            print("❌ <manifest> tag not found")
-            exit(1)
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
 
-        # Step 2: Add permissions after <manifest> (but before <application>)
-        # Collect existing permissions
-        existing_perms = set()
-        app_line_index = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith('<application'):
-                app_line_index = i
-                break
-            if line.strip().startswith('<uses-permission'):
-                match = re.search(r'android:name="([^"]+)"', line)
-                if match:
-                    existing_perms.add(match.group(1))
+                </activity>
 
-        permissions_to_add = [
-            'android.permission.CAMERA',
-            'android.permission.INTERNET',
-            'android.permission.ACCESS_NETWORK_STATE',
-            'android.permission.VIBRATE',
-            'android.permission.POST_NOTIFICATIONS',
-            'android.permission.WAKE_LOCK'
-        ]
+                <provider
+                    android:name="androidx.core.content.FileProvider"
+                    android:authorities="${applicationId}.fileprovider"
+                    android:exported="false"
+                    android:grantUriPermissions="true">
+                    <meta-data
+                        android:name="android.support.FILE_PROVIDER_PATHS"
+                        android:resource="@xml/file_paths" />
+                </provider>
 
-        # Insert permissions just after the first <manifest> line (before any <uses-permission>)
-        insert_index = manifest_line_index + 1
-        for perm in permissions_to_add:
-            if perm not in existing_perms:
-                lines.insert(insert_index, f'    <uses-permission android:name="{perm}" />\n')
-                insert_index += 1
-                print(f"✅ Added {perm}")
+                <!-- FCM Meta-data -->
+                <meta-data
+                    android:name="com.google.firebase.messaging.default_notification_channel_id"
+                    android:value="default" />
+                <meta-data
+                    android:name="com.google.firebase.messaging.default_notification_icon"
+                    android:resource="@drawable/ic_launcher" />
 
-        if app_line_index is None:
-            print("❌ <application> tag not found")
-            exit(1)
+                <!-- AdMob App ID (using secret or test ID) -->
+                <meta-data
+                    android:name="com.google.android.gms.ads.APPLICATION_ID"
+                    android:value="${{ secrets.ADMOB_APP_ID || 'ca-app-pub-3940256099942544~3347511713' }}" />
 
-        # Step 3: Add meta-data inside <application> (after the <application> line)
-        # Find the line number of <application> (may have been shifted)
-        for i, line in enumerate(lines):
-            if line.strip().startswith('<application'):
-                app_line_index = i
-                break
+            </application>
 
-        # Check which meta-data already exist
-        existing_meta = set()
-        for line in lines:
-            if '<meta-data' in line:
-                match = re.search(r'android:name="([^"]+)"', line)
-                if match:
-                    existing_meta.add(match.group(1))
-
-        # Prepare meta-data lines to insert (with proper indentation)
-        meta_lines = []
-        if 'com.google.firebase.messaging.default_notification_channel_id' not in existing_meta:
-            meta_lines.append('        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default" />')
-        if 'com.google.firebase.messaging.default_notification_icon' not in existing_meta:
-            meta_lines.append('        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_launcher" />')
-        if 'com.google.android.gms.ads.APPLICATION_ID' not in existing_meta:
-            # Use secret or test ID
-            admob_id = os.environ.get('ADMOB_APP_ID')
-            if not admob_id:
-                admob_id = 'ca-app-pub-3940256099942544~3347511713'
-                print("⚠️ ADMOB_APP_ID secret not set — using test ID")
-            meta_lines.append(f'        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="{admob_id}" />')
-
-        # Insert meta-data after the <application> line (at app_line_index + 1)
-        if meta_lines:
-            insert_pos = app_line_index + 1
-            for meta_line in reversed(meta_lines):  # reverse to maintain order
-                lines.insert(insert_pos, meta_line + '\n')
-                print(f"✅ Added {meta_line.strip()}")
-
-        # Write back the modified content
-        with open(manifest_path, 'w') as f:
-            f.writelines(lines)
-
-        print("✅ Manifest patched successfully")
-
-        # Validate XML by parsing with ElementTree (optional)
-        try:
-            import xml.etree.ElementTree as ET
-            ET.parse(manifest_path)
-            print("✅ XML validation passed")
-        except Exception as e:
-            print(f"⚠️ XML validation warning: {e}")
-
-        # Print final manifest for debugging
-        print("=== Final AndroidManifest.xml ===")
-        with open(manifest_path, 'r') as f:
-            print(f.read())
-        PYEOF
-      env:
-        ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+        </manifest>
+        EOF
+        echo "✅ Created a clean AndroidManifest.xml"
+        cat android/app/src/main/AndroidManifest.xml
 
     - name: Add Firebase Messaging dependency to build.gradle
       run: |
