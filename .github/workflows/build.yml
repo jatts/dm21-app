@@ -59,45 +59,6 @@ jobs:
           exit 1
         fi
 
-    - name: Patch MainActivity for OneSignal
-      run: |
-        MAIN=$(find android -name "MainActivity.java" | head -1)
-        echo "MainActivity: $MAIN"
-        cat "$MAIN"
-
-        python3 << 'PYEOF'
-        import re
-
-        path = None
-        import subprocess
-        result = subprocess.run(['find', 'android', '-name', 'MainActivity.java'], capture_output=True, text=True)
-        path = result.stdout.strip().split('\n')[0]
-        print(f"Patching: {path}")
-
-        with open(path, 'r') as f:
-            code = f.read()
-
-        if 'OneSignal' in code:
-            print("Already patched!")
-        else:
-            # Add imports after BridgeActivity import
-            code = code.replace(
-                'import com.getcapacitor.BridgeActivity;',
-                'import com.getcapacitor.BridgeActivity;\nimport com.onesignal.OneSignal;\nimport com.onesignal.debug.LogLevel;'
-            )
-            # Add OneSignal init in onCreate
-            code = code.replace(
-                'super.onCreate(savedInstanceState);',
-                'super.onCreate(savedInstanceState);\n\n        // OneSignal Init\n        OneSignal.getDebug().setLogLevel(LogLevel.VERBOSE);\n        OneSignal.initWithContext(this, "f9e441e6-0852-4f55-82b4-066379edc977");'
-            )
-            with open(path, 'w') as f:
-                f.write(code)
-            print("✅ MainActivity patched!")
-
-        with open(path, 'r') as f:
-            print(f.read())
-        PYEOF
-
     - name: Set Version Code and Version Name
       run: |
         sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
