@@ -96,12 +96,8 @@ jobs:
             print(f"✅ PNG {folder}: {size}x{size}px")
 
         # 2. Adaptive icon foreground (Android 8.0+)
-        # Canvas = 108dp. Safe zone = 66dp (icon edge tak nahi aana chahiye)
-        # Formula: icon = 66/108 = ~61% of canvas size, centered mein rakho
-        # Padding dono taraf = (canvas - icon) / 2
-
         def make_foreground(img, canvas_px):
-            icon_px = int(canvas_px * 0.61)  # 61% = safe zone
+            icon_px = int(canvas_px * 0.61)
             pad = (canvas_px - icon_px) // 2
             canvas = Image.new("RGBA", (canvas_px, canvas_px), (0, 0, 0, 0))
             icon = img.resize((icon_px, icon_px), Image.LANCZOS)
@@ -125,7 +121,6 @@ jobs:
         print("All icons done!")
         EOF
 
-          # 3. ic_launcher_background ko white/solid color se replace karo
           cat > android/app/src/main/res/drawable/ic_launcher_background.xml << 'XML'
         <?xml version="1.0" encoding="utf-8"?>
         <shape xmlns:android="http://schemas.android.com/apk/res/android">
@@ -134,8 +129,6 @@ jobs:
         XML
           echo "✅ Background set to white"
 
-          # 4. mipmap-anydpi-v26/ic_launcher.xml — adaptive icon definition
-          # Yeh file Android 8+ pe use hoti hai — foreground aur background define karta hai
           mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML'
         <?xml version="1.0" encoding="utf-8"?>
@@ -154,7 +147,6 @@ jobs:
         XML
           echo "✅ Adaptive icon XMLs updated"
 
-          # 5. drawable-anydpi-v24 foreground XML bhi update karo
           mkdir -p android/app/src/main/res/drawable-anydpi-v24
           cat > android/app/src/main/res/drawable-anydpi-v24/ic_launcher_foreground.xml << 'XML'
         <?xml version="1.0" encoding="utf-8"?>
@@ -166,7 +158,6 @@ jobs:
         XML
           echo "✅ Foreground drawable XML updated"
 
-          # Gradle cache clear karo
           rm -rf android/app/build/intermediates/merged_res/
           rm -rf android/app/build/intermediates/packaged_res/
           rm -rf android/app/build/intermediates/res/
@@ -174,6 +165,18 @@ jobs:
         else
           echo "⚠️ assets/icon.png not found — default icon use hoga"
         fi
+
+    # ===== 🔥 FIX: OneSignal Library Gradle mein add karo =====
+    - name: Add OneSignal dependency to build.gradle
+      run: |
+        echo "=== Adding OneSignal dependency to build.gradle ==="
+        if ! grep -q "onesignal" android/app/build.gradle; then
+          sed -i '/dependencies {/a\    implementation "com.onesignal:OneSignal:5.1.0"' android/app/build.gradle
+          echo "✅ OneSignal dependency added"
+        else
+          echo "ℹ️ OneSignal dependency already exists"
+        fi
+        grep -A 2 "dependencies {" android/app/build.gradle || true
 
     - name: Patch MainActivity for OneSignal (onesignal-cordova-plugin requirement)
       run: |
@@ -184,16 +187,13 @@ jobs:
         fi
         echo "Found: $MAIN"
 
-        # Check already patched nahi hai
         if grep -q "OneSignal" "$MAIN"; then
           echo "✅ MainActivity already has OneSignal"
         else
-          # import add karo
           sed -i 's/import com.getcapacitor.BridgeActivity;/import com.getcapacitor.BridgeActivity;
-import com.onesignal.OneSignal;
-import com.onesignal.debug.LogLevel;/' "$MAIN"
+        import com.onesignal.OneSignal;
+        import com.onesignal.debug.LogLevel;/' "$MAIN"
 
-          # onCreate mein OneSignal init add karo
           sed -i 's/super.onCreate(savedInstanceState);/super.onCreate(savedInstanceState);
 
         \/\/ OneSignal init
@@ -237,6 +237,11 @@ import com.onesignal.debug.LogLevel;/' "$MAIN"
         echo "=== Icons inside APK ==="
         unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -i "mipmap\|ic_launcher" || echo "No mipmap found"
 
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: dm21-v2.1.apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
