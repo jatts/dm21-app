@@ -32,9 +32,10 @@ jobs:
     - name: Verify Capacitor plugins installed
       run: |
         echo "=== Checking node_modules for plugins ==="
-        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob plugin native code present" || echo "❌ AdMob plugin native code MISSING"
-        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS plugin native code present" || echo "❌ TTS plugin native code MISSING"
-        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar plugin native code present" || echo "❌ StatusBar plugin native code MISSING"
+        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
+        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
+        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
+        ls node_modules/onesignal-cordova-plugin/src/android/ 2>/dev/null && echo "✅ OneSignal present" || echo "❌ OneSignal MISSING"
 
     - name: Install Capacitor CLI globally
       run: npm install -g @capacitor/cli
@@ -54,10 +55,48 @@ jobs:
           cp google-services.json android/app/google-services.json
           echo "✅ google-services.json copied"
         else
-          echo "❌ google-services.json NOT FOUND — OneSignal/FCM kaam nahi karega!"
-          echo "Firebase Console se download karke repo mein rakho"
+          echo "❌ google-services.json NOT FOUND"
           exit 1
         fi
+
+    - name: Patch MainActivity for OneSignal
+      run: |
+        MAIN=$(find android -name "MainActivity.java" | head -1)
+        echo "MainActivity: $MAIN"
+        cat "$MAIN"
+
+        python3 << 'PYEOF'
+        import re
+
+        path = None
+        import subprocess
+        result = subprocess.run(['find', 'android', '-name', 'MainActivity.java'], capture_output=True, text=True)
+        path = result.stdout.strip().split('\n')[0]
+        print(f"Patching: {path}")
+
+        with open(path, 'r') as f:
+            code = f.read()
+
+        if 'OneSignal' in code:
+            print("Already patched!")
+        else:
+            # Add imports after BridgeActivity import
+            code = code.replace(
+                'import com.getcapacitor.BridgeActivity;',
+                'import com.getcapacitor.BridgeActivity;\nimport com.onesignal.OneSignal;\nimport com.onesignal.debug.LogLevel;'
+            )
+            # Add OneSignal init in onCreate
+            code = code.replace(
+                'super.onCreate(savedInstanceState);',
+                'super.onCreate(savedInstanceState);\n\n        // OneSignal Init\n        OneSignal.getDebug().setLogLevel(LogLevel.VERBOSE);\n        OneSignal.initWithContext(this, "f9e441e6-0852-4f55-82b4-066379edc977");'
+            )
+            with open(path, 'w') as f:
+                f.write(code)
+            print("✅ MainActivity patched!")
+
+        with open(path, 'r') as f:
+            print(f.read())
+        PYEOF
 
     - name: Set Version Code and Version Name
       run: |
@@ -66,60 +105,43 @@ jobs:
         echo "=== Version check ==="
         grep -E "versionCode|versionName" android/app/build.gradle
 
-    - name: Set App Icon (adaptive + legacy both)
+    - name: Set App Icon
       run: |
         if [ -f "assets/icon.png" ]; then
-          echo "✅ Icon found — setting all icon types..."
           pip install Pillow --quiet
-
-          python3 << 'EOF'
+          python3 << 'PYEOF'
         from PIL import Image
         import os
 
         src = "assets/icon.png"
         img = Image.open(src).convert("RGBA")
 
-        # 1. Legacy PNG icons (Android < 8.0)
         sizes = {
-            "mipmap-mdpi":    48,
-            "mipmap-hdpi":    72,
-            "mipmap-xhdpi":   96,
-            "mipmap-xxhdpi":  144,
-            "mipmap-xxxhdpi": 192,
+            "mipmap-mdpi": 48, "mipmap-hdpi": 72,
+            "mipmap-xhdpi": 96, "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192,
         }
         for folder, size in sizes.items():
-            out_dir = f"android/app/src/main/res/{folder}"
-            os.makedirs(out_dir, exist_ok=True)
-            resized = img.resize((size, size), Image.LANCZOS)
-            resized.save(f"{out_dir}/ic_launcher.png")
-            resized.save(f"{out_dir}/ic_launcher_round.png")
-            print(f"✅ PNG {folder}: {size}x{size}px")
+            d = f"android/app/src/main/res/{folder}"
+            os.makedirs(d, exist_ok=True)
+            r = img.resize((size, size), Image.LANCZOS)
+            r.save(f"{d}/ic_launcher.png")
+            r.save(f"{d}/ic_launcher_round.png")
+            print(f"✅ {folder}: {size}px")
 
-        # 2. Adaptive icon foreground (Android 8.0+)
-        def make_foreground(img, canvas_px):
-            icon_px = int(canvas_px * 0.61)
-            pad = (canvas_px - icon_px) // 2
-            canvas = Image.new("RGBA", (canvas_px, canvas_px), (0, 0, 0, 0))
-            icon = img.resize((icon_px, icon_px), Image.LANCZOS)
-            canvas.paste(icon, (pad, pad), icon)
-            return canvas
+        def make_fg(img, canvas):
+            icon = int(canvas * 0.61)
+            pad = (canvas - icon) // 2
+            c = Image.new("RGBA", (canvas, canvas), (0,0,0,0))
+            c.paste(img.resize((icon,icon), Image.LANCZOS), (pad,pad), img.resize((icon,icon), Image.LANCZOS))
+            return c
 
-        fg_sizes = {
-            "mipmap-mdpi":    108,
-            "mipmap-hdpi":    162,
-            "mipmap-xhdpi":   216,
-            "mipmap-xxhdpi":  324,
-            "mipmap-xxxhdpi": 432,
-        }
-        for folder, size in fg_sizes.items():
-            out_dir = f"android/app/src/main/res/{folder}"
-            os.makedirs(out_dir, exist_ok=True)
-            fg = make_foreground(img, size)
-            fg.save(f"{out_dir}/ic_launcher_foreground.png")
-            print(f"✅ Foreground {folder}: {size}x{size}px (icon={int(size*0.61)}px centered)")
-
-        print("All icons done!")
-        EOF
+        fg = {"mipmap-mdpi":108,"mipmap-hdpi":162,"mipmap-xhdpi":216,"mipmap-xxhdpi":324,"mipmap-xxxhdpi":432}
+        for folder, size in fg.items():
+            d = f"android/app/src/main/res/{folder}"
+            os.makedirs(d, exist_ok=True)
+            make_fg(img, size).save(f"{d}/ic_launcher_foreground.png")
+            print(f"✅ FG {folder}: {size}px")
+        PYEOF
 
           cat > android/app/src/main/res/drawable/ic_launcher_background.xml << 'XML'
         <?xml version="1.0" encoding="utf-8"?>
@@ -127,7 +149,6 @@ jobs:
             <solid android:color="#FFFFFF"/>
         </shape>
         XML
-          echo "✅ Background set to white"
 
           mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML'
@@ -145,111 +166,20 @@ jobs:
             <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
         </adaptive-icon>
         XML
-          echo "✅ Adaptive icon XMLs updated"
-
-          mkdir -p android/app/src/main/res/drawable-anydpi-v24
-          cat > android/app/src/main/res/drawable-anydpi-v24/ic_launcher_foreground.xml << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-            <item>
-                <bitmap android:src="@mipmap/ic_launcher_foreground" android:gravity="center"/>
-            </item>
-        </layer-list>
-        XML
-          echo "✅ Foreground drawable XML updated"
-
-          rm -rf android/app/build/intermediates/merged_res/
-          rm -rf android/app/build/intermediates/packaged_res/
-          rm -rf android/app/build/intermediates/res/
-          echo "✅ Gradle resource cache cleared"
+          echo "✅ Icons set"
         else
-          echo "⚠️ assets/icon.png not found — default icon use hoga"
+          echo "⚠️ No icon found"
         fi
-
-    # ===== 🔥 FIX 1: OneSignal dependency in build.gradle =====
-    - name: Add OneSignal dependency to build.gradle
-      run: |
-        echo "=== Adding OneSignal dependency to build.gradle ==="
-        if ! grep -q "onesignal" android/app/build.gradle; then
-          sed -i '/dependencies {/a\    implementation "com.onesignal:OneSignal:5.1.0"' android/app/build.gradle
-          echo "✅ OneSignal dependency added"
-        else
-          echo "ℹ️ OneSignal dependency already exists"
-        fi
-        grep -A 2 "dependencies {" android/app/build.gradle || true
-
-    # ===== 🔥 FIX 2: Patch MainActivity with Python (avoid sed issues) =====
-    - name: Patch MainActivity for OneSignal
-      run: |
-        MAIN=$(find android -name "MainActivity.java" | head -1)
-        if [ -z "$MAIN" ]; then
-          echo "❌ MainActivity.java not found"
-          exit 1
-        fi
-        echo "Found: $MAIN"
-
-        python3 << 'PYTHON_SCRIPT'
-        import sys, re
-
-        filename = sys.argv[1]
-        with open(filename, 'r') as f:
-            lines = f.readlines()
-
-        # Check if already patched
-        content = ''.join(lines)
-        if 'OneSignal' in content:
-            print('✅ MainActivity already has OneSignal')
-            sys.exit(0)
-
-        new_lines = []
-        inserted_imports = False
-        inserted_init = False
-
-        for line in lines:
-            new_lines.append(line)
-            # Insert imports right after the existing BridgeActivity import
-            if not inserted_imports and 'import com.getcapacitor.BridgeActivity;' in line:
-                new_lines.append('import com.onesignal.OneSignal;\n')
-                new_lines.append('import com.onesignal.debug.LogLevel;\n')
-                inserted_imports = True
-            # Insert OneSignal init after super.onCreate
-            if not inserted_init and 'super.onCreate(savedInstanceState);' in line:
-                new_lines.append('\n')
-                new_lines.append('        // OneSignal init\n')
-                new_lines.append('        OneSignal.getDebug().setLogLevel(LogLevel.VERBOSE);\n')
-                new_lines.append('        OneSignal.initWithContext(this, "f9e441e6-0852-4f55-82b4-066379edc977");\n')
-                inserted_init = True
-
-        with open(filename, 'w') as f:
-            f.writelines(new_lines)
-
-        print('✅ MainActivity patched with OneSignal')
-        PYTHON_SCRIPT
-        python3 -c "import sys; sys.argv=['']; exec(open('$0').read())" "$MAIN"  # Actually we need to pass argument
-        # The above won't work because we used a heredoc with arguments; better to use a separate script file.
-        # Let's rewrite using inline Python with argument passed via environment variable.
-        # I'll fix it below.
-
-    # The above step has a flaw: the Python script inside heredoc doesn't receive sys.argv correctly.
-    # Let's rewrite that step properly in the final version.
 
     - name: Add Permissions to AndroidManifest
       run: |
         MANIFEST=android/app/src/main/AndroidManifest.xml
-        sed -i '/<manifest/a\
-        <uses-permission android:name="android.permission.CAMERA" />\
-        <uses-feature android:name="android.hardware.camera" android:required="false" />\
-        <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />\
-        <uses-feature android:name="android.hardware.camera.flash" android:required="false" />' "$MANIFEST"
-        sed -i '/<manifest/a\
-        <uses-permission android:name="android.permission.INTERNET" />\
-        <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
-        sed -i '/<manifest/a\
-        <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
-        sed -i '/<manifest/a\
-        <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
-        sed -i '/<manifest/a\
-        <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
 
     - name: Add AdMob App ID to AndroidManifest
       run: |
@@ -260,11 +190,6 @@ jobs:
         cd android
         chmod +x gradlew
         ./gradlew assembleDebug
-
-    - name: Verify icons in APK
-      run: |
-        echo "=== Icons inside APK ==="
-        unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -i "mipmap\|ic_launcher" || echo "No mipmap found"
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
