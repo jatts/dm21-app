@@ -7,6 +7,15 @@
     "cleartext": false
   },
   "plugins": {
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert",
+        "banner",
+        "list"
+      ]
+    },
     "AdMob": {
       "appId": "ca-app-pub-3940256099942544~3347511713",
       "testingDevices": [],
