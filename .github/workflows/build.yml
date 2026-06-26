@@ -29,50 +29,17 @@ jobs:
         rm -rf node_modules package-lock.json
         npm install --legacy-peer-deps
 
-    - name: Install @capacitor/push-notifications
+    - name: Verify Capacitor plugins installed
       run: |
-        npm install @capacitor/push-notifications --legacy-peer-deps
-
-    - name: Verify Capacitor plugins
-      run: |
-        echo "=== Checking plugins ==="
+        echo "=== Checking node_modules for plugins ==="
         ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
+        ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ PushNotifications present" || echo "❌ PushNotifications MISSING"
         ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
         ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
-        ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ Push Notifications present" || echo "❌ Push Notifications MISSING"
+        ls node_modules/onesignal-cordova-plugin/src/android/ 2>/dev/null && echo "✅ OneSignal present" || echo "❌ OneSignal MISSING"
 
     - name: Install Capacitor CLI globally
       run: npm install -g @capacitor/cli
-
-    - name: Validate and fix capacitor.config.json
-      run: |
-        echo "=== Current config ==="
-        cat capacitor.config.json
-        echo ""
-        python3 << 'PYEOF'
-        import json, sys, os
-        try:
-            with open('capacitor.config.json', 'r') as f:
-                config = json.load(f)
-            print("✅ JSON is valid.")
-            if 'appId' not in config:
-                print("❌ appId missing, adding it...")
-                config['appId'] = 'com.Rizwan.dm'
-                if 'appName' not in config:
-                    config['appName'] = 'Discount Manager'
-                if 'webDir' not in config:
-                    config['webDir'] = 'www'
-                with open('capacitor.config.json', 'w') as f:
-                    json.dump(config, f, indent=2)
-                print("✅ Fixed config with appId")
-            else:
-                print("✅ appId exists:", config['appId'])
-        except json.JSONDecodeError as e:
-            print("❌ JSON syntax error:", e)
-            sys.exit(1)
-        PYEOF
-        echo "=== After validation ==="
-        cat capacitor.config.json
 
     - name: Remove old android folder
       run: rm -rf android
@@ -82,84 +49,6 @@ jobs:
 
     - name: Sync Capacitor
       run: npx @capacitor/cli sync android
-
-    # ─── CREATE A CLEAN, VALID AndroidManifest.xml ───
-    - name: Create a clean AndroidManifest.xml
-      run: |
-        cat > android/app/src/main/AndroidManifest.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-            package="com.Rizwan.dm">
-
-            <!-- Permissions -->
-            <uses-permission android:name="android.permission.INTERNET" />
-            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-            <uses-permission android:name="android.permission.CAMERA" />
-            <uses-permission android:name="android.permission.VIBRATE" />
-            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-            <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-            <application
-                android:allowBackup="true"
-                android:icon="@mipmap/ic_launcher"
-                android:label="@string/app_name"
-                android:roundIcon="@mipmap/ic_launcher_round"
-                android:supportsRtl="true"
-                android:theme="@style/AppTheme">
-
-                <activity
-                    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-                    android:name="com.Rizwan.dm.MainActivity"
-                    android:label="@string/app_name"
-                    android:theme="@style/AppTheme.NoActionBarLaunch"
-                    android:exported="true">
-
-                    <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
-                    </intent-filter>
-
-                </activity>
-
-                <provider
-                    android:name="androidx.core.content.FileProvider"
-                    android:authorities="${applicationId}.fileprovider"
-                    android:exported="false"
-                    android:grantUriPermissions="true">
-                    <meta-data
-                        android:name="android.support.FILE_PROVIDER_PATHS"
-                        android:resource="@xml/file_paths" />
-                </provider>
-
-                <!-- FCM Meta-data -->
-                <meta-data
-                    android:name="com.google.firebase.messaging.default_notification_channel_id"
-                    android:value="default" />
-                <meta-data
-                    android:name="com.google.firebase.messaging.default_notification_icon"
-                    android:resource="@drawable/ic_launcher" />
-
-                <!-- AdMob App ID (using secret or test ID) -->
-                <meta-data
-                    android:name="com.google.android.gms.ads.APPLICATION_ID"
-                    android:value="${{ secrets.ADMOB_APP_ID || 'ca-app-pub-3940256099942544~3347511713' }}" />
-
-            </application>
-
-        </manifest>
-        EOF
-        echo "✅ Created a clean AndroidManifest.xml"
-        cat android/app/src/main/AndroidManifest.xml
-
-    - name: Add Firebase Messaging dependency to build.gradle
-      run: |
-        GRADLE=android/app/build.gradle
-        if ! grep -q "firebase-messaging" "$GRADLE"; then
-          sed -i '/dependencies {/a\    implementation "com.google.firebase:firebase-messaging:23.4.0"' "$GRADLE"
-          echo "✅ Firebase Messaging dependency added"
-        else
-          echo "ℹ️ Firebase Messaging already present"
-        fi
 
     - name: Copy google-services.json
       run: |
@@ -243,6 +132,20 @@ jobs:
         else
           echo "⚠️ No icon found"
         fi
+
+    - name: Add Permissions to AndroidManifest
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
+
+    - name: Add AdMob App ID to AndroidManifest
+      run: |
+        sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' android/app/src/main/AndroidManifest.xml
 
     - name: Build Debug APK
       run: |
