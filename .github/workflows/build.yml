@@ -10,151 +10,84 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-    - name: Setup Java
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
 
-    - name: Clean install dependencies
-      run: |
-        rm -rf node_modules package-lock.json
-        npm install --legacy-peer-deps
+      - name: Clean install dependencies
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install --legacy-peer-deps
 
-    - name: Verify Capacitor plugins installed
-      run: |
-        echo "=== Checking node_modules for plugins ==="
-        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
-        ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ PushNotifications present" || echo "❌ PushNotifications MISSING"
-        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
-        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
-        ls node_modules/onesignal-cordova-plugin/src/android/ 2>/dev/null && echo "✅ OneSignal present" || echo "❌ OneSignal MISSING"
+      - name: Verify Capacitor plugins installed
+        run: |
+          echo "=== Checking node_modules for plugins ==="
+          ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
+          ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ PushNotifications present" || echo "❌ PushNotifications MISSING"
+          ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
+          ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
 
-    - name: Install Capacitor CLI globally
-      run: npm install -g @capacitor/cli
+      - name: Install Capacitor CLI globally
+        run: npm install -g @capacitor/cli
 
-    - name: Remove old android folder
-      run: rm -rf android
+      - name: Remove old android folder
+        run: rm -rf android
 
-    - name: Add Android platform
-      run: npx @capacitor/cli add android
+      - name: Add Android platform
+        run: npx @capacitor/cli add android
 
-    - name: Sync Capacitor
-      run: npx @capacitor/cli sync android
+      - name: Copy google-services.json
+        run: |
+          if [ -f "google-services.json" ]; then
+            cp google-services.json android/app/google-services.json
+            echo "✅ google-services.json copied"
+          else
+            echo "❌ google-services.json NOT FOUND"
+            exit 1
+          fi
 
-    - name: Copy google-services.json
-      run: |
-        if [ -f "google-services.json" ]; then
-          cp google-services.json android/app/google-services.json
-          echo "✅ google-services.json copied"
-        else
-          echo "❌ google-services.json NOT FOUND"
-          exit 1
-        fi
+      - name: Sync Capacitor
+        run: npx @capacitor/cli sync android
 
-    - name: Set Version Code and Version Name
-      run: |
-        sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
-        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
-        echo "=== Version check ==="
-        grep -E "versionCode|versionName" android/app/build.gradle
+      - name: Set Version Code and Version Name
+        run: |
+          sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
+          sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
+          echo "=== Version check ==="
+          grep -E "versionCode|versionName" android/app/build.gradle
 
-    - name: Set App Icon
-      run: |
-        if [ -f "assets/icon.png" ]; then
-          pip install Pillow --quiet
-          python3 << 'PYEOF'
-        from PIL import Image
-        import os
+      - name: Add Permissions to AndroidManifest
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
+          sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
 
-        src = "assets/icon.png"
-        img = Image.open(src).convert("RGBA")
+      - name: Add AdMob App ID to AndroidManifest
+        run: |
+          sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' android/app/src/main/AndroidManifest.xml
 
-        sizes = {
-            "mipmap-mdpi": 48, "mipmap-hdpi": 72,
-            "mipmap-xhdpi": 96, "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192,
-        }
-        for folder, size in sizes.items():
-            d = f"android/app/src/main/res/{folder}"
-            os.makedirs(d, exist_ok=True)
-            r = img.resize((size, size), Image.LANCZOS)
-            r.save(f"{d}/ic_launcher.png")
-            r.save(f"{d}/ic_launcher_round.png")
-            print(f"✅ {folder}: {size}px")
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-        def make_fg(img, canvas):
-            icon = int(canvas * 0.61)
-            pad = (canvas - icon) // 2
-            c = Image.new("RGBA", (canvas, canvas), (0,0,0,0))
-            c.paste(img.resize((icon,icon), Image.LANCZOS), (pad,pad), img.resize((icon,icon), Image.LANCZOS))
-            return c
-
-        fg = {"mipmap-mdpi":108,"mipmap-hdpi":162,"mipmap-xhdpi":216,"mipmap-xxhdpi":324,"mipmap-xxxhdpi":432}
-        for folder, size in fg.items():
-            d = f"android/app/src/main/res/{folder}"
-            os.makedirs(d, exist_ok=True)
-            make_fg(img, size).save(f"{d}/ic_launcher_foreground.png")
-            print(f"✅ FG {folder}: {size}px")
-        PYEOF
-
-          cat > android/app/src/main/res/drawable/ic_launcher_background.xml << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <shape xmlns:android="http://schemas.android.com/apk/res/android">
-            <solid android:color="#FFFFFF"/>
-        </shape>
-        XML
-
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-            <background android:drawable="@drawable/ic_launcher_background"/>
-            <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-        </adaptive-icon>
-        XML
-
-          cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-            <background android:drawable="@drawable/ic_launcher_background"/>
-            <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-        </adaptive-icon>
-        XML
-          echo "✅ Icons set"
-        else
-          echo "⚠️ No icon found"
-        fi
-
-    - name: Add Permissions to AndroidManifest
-      run: |
-        MANIFEST=android/app/src/main/AndroidManifest.xml
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
-
-    - name: Add AdMob App ID to AndroidManifest
-      run: |
-        sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' android/app/src/main/AndroidManifest.xml
-
-    - name: Build Debug APK
-      run: |
-        cd android
-        chmod +x gradlew
-        ./gradlew assembleDebug
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: dm21-v2.1.apk
-        path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dm21-v2.1.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
