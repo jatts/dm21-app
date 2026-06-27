@@ -31,12 +31,11 @@ jobs:
 
     - name: Verify Capacitor plugins installed
       run: |
-        echo "=== Checking node_modules for plugins ==="
-        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob present" || echo "❌ AdMob MISSING"
-        ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ PushNotifications present" || echo "❌ PushNotifications MISSING"
-        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS present" || echo "❌ TTS MISSING"
-        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar present" || echo "❌ StatusBar MISSING"
-        ls node_modules/onesignal-cordova-plugin/src/android/ 2>/dev/null && echo "✅ OneSignal present" || echo "❌ OneSignal MISSING"
+        echo "=== Checking plugins ==="
+        ls node_modules/@capacitor-community/admob/android/ 2>/dev/null && echo "✅ AdMob" || echo "❌ AdMob MISSING"
+        ls node_modules/@capacitor-community/text-to-speech/android/ 2>/dev/null && echo "✅ TTS" || echo "❌ TTS MISSING"
+        ls node_modules/@capacitor/status-bar/android/ 2>/dev/null && echo "✅ StatusBar" || echo "❌ StatusBar MISSING"
+        ls node_modules/@capacitor/push-notifications/android/ 2>/dev/null && echo "✅ PushNotifications" || echo "❌ PushNotifications MISSING"
 
     - name: Install Capacitor CLI globally
       run: npm install -g @capacitor/cli
@@ -62,10 +61,41 @@ jobs:
 
     - name: Set Version Code and Version Name
       run: |
-        sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle
-        sed -i 's/versionName "[^"]*"/versionName "2.1"/' android/app/build.gradle
-        echo "=== Version check ==="
+        sed -i 's/versionCode [0-9]*/versionCode 22/' android/app/build.gradle
+        sed -i 's/versionName "[^"]*"/versionName "2.2"/' android/app/build.gradle
         grep -E "versionCode|versionName" android/app/build.gradle
+
+    - name: Add FCM Channel and AdMob to AndroidManifest
+      run: |
+        python3 << 'PYEOF'
+        with open('android/app/src/main/AndroidManifest.xml', 'r') as f:
+            manifest = f.read()
+
+        insert = """
+            <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${ADMOB_APP_ID}"/>
+            <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="fcm_fallback_notification_channel"/>
+            <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@mipmap/ic_launcher"/>"""
+
+        manifest = manifest.replace('</application>', insert + '\n    </application>')
+
+        with open('android/app/src/main/AndroidManifest.xml', 'w') as f:
+            f.write(manifest)
+        print("✅ AndroidManifest updated!")
+        PYEOF
+        # AdMob secret replace karo
+        sed -i 's|\${ADMOB_APP_ID}|${{ secrets.ADMOB_APP_ID }}|g' android/app/src/main/AndroidManifest.xml
+        echo "✅ AdMob ID injected"
+
+    - name: Add Permissions to AndroidManifest
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
+        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
+        echo "✅ Permissions added"
 
     - name: Set App Icon
       run: |
@@ -78,14 +108,11 @@ jobs:
         src = "assets/icon.png"
         img = Image.open(src).convert("RGBA")
 
-        sizes = {
-            "mipmap-mdpi": 48, "mipmap-hdpi": 72,
-            "mipmap-xhdpi": 96, "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192,
-        }
+        sizes = {"mipmap-mdpi":48,"mipmap-hdpi":72,"mipmap-xhdpi":96,"mipmap-xxhdpi":144,"mipmap-xxxhdpi":192}
         for folder, size in sizes.items():
             d = f"android/app/src/main/res/{folder}"
             os.makedirs(d, exist_ok=True)
-            r = img.resize((size, size), Image.LANCZOS)
+            r = img.resize((size,size), Image.LANCZOS)
             r.save(f"{d}/ic_launcher.png")
             r.save(f"{d}/ic_launcher_round.png")
             print(f"✅ {folder}: {size}px")
@@ -93,8 +120,9 @@ jobs:
         def make_fg(img, canvas):
             icon = int(canvas * 0.61)
             pad = (canvas - icon) // 2
-            c = Image.new("RGBA", (canvas, canvas), (0,0,0,0))
-            c.paste(img.resize((icon,icon), Image.LANCZOS), (pad,pad), img.resize((icon,icon), Image.LANCZOS))
+            c = Image.new("RGBA", (canvas,canvas), (0,0,0,0))
+            ic = img.resize((icon,icon), Image.LANCZOS)
+            c.paste(ic, (pad,pad), ic)
             return c
 
         fg = {"mipmap-mdpi":108,"mipmap-hdpi":162,"mipmap-xhdpi":216,"mipmap-xxhdpi":324,"mipmap-xxxhdpi":432}
@@ -102,7 +130,7 @@ jobs:
             d = f"android/app/src/main/res/{folder}"
             os.makedirs(d, exist_ok=True)
             make_fg(img, size).save(f"{d}/ic_launcher_foreground.png")
-            print(f"✅ FG {folder}: {size}px")
+        print("✅ All icons done!")
         PYEOF
 
           cat > android/app/src/main/res/drawable/ic_launcher_background.xml << 'XML'
@@ -120,7 +148,6 @@ jobs:
             <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
         </adaptive-icon>
         XML
-
           cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'XML'
         <?xml version="1.0" encoding="utf-8"?>
         <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
@@ -129,23 +156,7 @@ jobs:
         </adaptive-icon>
         XML
           echo "✅ Icons set"
-        else
-          echo "⚠️ No icon found"
         fi
-
-    - name: Add Permissions to AndroidManifest
-      run: |
-        MANIFEST=android/app/src/main/AndroidManifest.xml
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.VIBRATE" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' "$MANIFEST"
-        sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WAKE_LOCK" />' "$MANIFEST"
-
-    - name: Add AdMob App ID to AndroidManifest
-      run: |
-        sed -i 's|</application>|<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="${{ secrets.ADMOB_APP_ID }}"/>\n</application>|' android/app/src/main/AndroidManifest.xml
 
     - name: Build Debug APK
       run: |
@@ -156,5 +167,5 @@ jobs:
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: dm21-v2.1.apk
+        name: dm21-v2.2.apk
         path: android/app/build/outputs/apk/debug/app-debug.apk
